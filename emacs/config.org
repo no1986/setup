@@ -1,0 +1,853 @@
+#+TITLE: Emacs Configuration
+
+Emacsの設定ファイル
+
+* Common
+** Package Manager
+#+BEGIN_SRC emacs-lisp
+  (custom-set-variables
+   '(package-archives '(("melpa" . "https://melpa.org/packages/")
+                        ("org"   . "https://orgmode.org/elpa/")
+                        ("gnu"   . "https://elpa.gnu.org/packages/"))))
+  (package-initialize)
+  (unless (package-installed-p 'leaf)
+    (package-refresh-contents)
+    (package-install 'leaf))
+
+  (leaf leaf
+    :config
+    (leaf use-package :ensure t)
+    (leaf leaf-keywords
+      :ensure t
+      :init
+      (leaf hydra :ensure t)
+      (leaf el-get :ensure t
+        :custom ((el-get-git-shallow-clone . t)))
+      (leaf diminish :ensure t)
+      :config
+      (leaf-keywords-init)))
+#+END_SRC
+
+** Basic
+#+BEGIN_SRC emacs-lisp
+  (leaf *basic
+    :disabled
+    :config
+    (leaf cus-edit
+      :custom `((custom-file . ,(locate-user-emacs-file "custom.el")))
+      :hook `((kill-emacs-hook
+               . (lambda ()
+                   (if (file-exists-p custom-file)
+                       (delete-file custom-file))))))
+    (leaf *var
+      :doc "builtinsの設定"
+      :config
+      ;; 文字
+      (leaf all-the-icons :ensure t)
+      ;; 不必要なバーを非表示
+      (tool-bar-mode -1)
+      (menu-bar-mode -1)
+      (scroll-bar-mode -1)
+      ;; Emacsからの質問をy/nで回答
+      (fset 'yes-or-no-p 'y-or-n-p)
+      ;; タブの設定
+      (setq-default tab-width 4)
+      (setq-default indent-tabs-mode nil)
+      ;; ミニバッファの履歴を保存
+      (savehist-mode t)
+      ;; ファイルを自動生成されないようにする
+      (setq make-backup-files nil)
+      (setq auto-save-default nil)
+      (setq auto-save-list-file-prefix nil)
+      ;; モードラインに行と列番号を表示
+      (column-number-mode t)
+      (line-number-mode t)
+      ;; フリンジに行番号を表示
+      (global-display-line-numbers-mode t)
+      ;; ファイルサイズを非表示
+      (size-indication-mode -1)
+      ;; 対応する括弧を自動入力
+      (electric-pair-mode t)
+      ;; kill ring
+      (setq kill-ring-max 1000)
+      (setq kill-read-only-ok t)
+      (setq kill-whole-line t)
+    )
+
+    (diminish 'auto-revert-mode)
+    (diminish 'eldoc-mode)
+    (diminish 'outline-minor-mode)
+    (leaf *hs-minor-mode
+      :config
+      (defun my-hs ()
+        (interactive)
+        (hs-minor-mode)
+        (diminish 'hs-minor-mode)))
+    )
+#+END_SRC
+
+** Key Binding
+#+BEGIN_SRC emacs-lisp
+  (leaf bind-key
+    :disabled
+    :ensure t
+    :config
+    ;; C-hをバックスペースにする
+    (define-key key-translation-map [?\C-h] [?\C-?])
+    (bind-keys*
+     ;; help
+     ("M-/" . help-for-help)
+     ;; 折り返し
+     ("C-x l" . toggle-truncate-lines)
+     ;; 行番号表示
+     ("C-c n" . global-display-line-numbers-mode)
+     ;; list-diredをdiredに
+     ("C-x C-d" . dired)
+     ;; コメント
+     ("M-;" . comment-or-uncomment-region)
+     ;; 折り畳み
+     ("M-j j" . hs-toggle-hiding)
+     ("M-j l" . hs-hide-level)
+     ("M-j s" . hs-show-all)
+     ("M-j h" . hs-hide-all)
+     )
+
+    ;; 利用しないキーの削除
+    (bind-keys
+     ;; 文字の入れ替わりを無効化
+     ("M-t"     . nil)
+     ("C-x C-t" . nil)
+     ;; undo
+     ("C-_"     . nil)
+     ("C-/"     . nil)
+     )
+    )
+#+END_SRC
+
+** Window
+#+begin_src emacs-lisp
+  (leaf *window
+    :disabled
+    :config
+    (defun window-resizer ()
+      "Control window size and position."
+      (interactive)
+      (let ((window-obj (selected-window))
+            (current-width (window-width))
+            (current-height (window-height))
+            (dx (if (= (nth 0 (window-edges)) 0) 1 -1))
+            (dy (if (= (nth 1 (window-edges)) 0) 1 -1))
+            c)
+        (catch 'end-flag
+          (while t
+            (message "size[%dx%d]"
+                     (window-width) (window-height))
+            (setq c (read-char))
+            (cond ((= c ?f)
+                   (enlarge-window-horizontally dx))
+                  ((= c ?b)
+                   (shrink-window-horizontally dx))
+                  ((= c ?n)
+                   (enlarge-window dy))
+                  ((= c ?p)
+                   (shrink-window dy))
+                  ;; otherwise
+                  (t (message "Quit")
+                     (throw 'end-flag t)))))))
+    (bind-key "C-c r" 'window-resizer)
+
+    (defun window-toggle-division ()
+      "ウィンドウ 2 分割時に、縦分割<->横分割"
+      (interactive)
+      (unless (= (count-windows 1) 2)
+        (error "ウィンドウが 2 分割されていません。"))
+      (let ((before-height)
+            (other-buf (window-buffer (next-window))))
+        (setq before-height (window-height))
+        (delete-other-windows)
+        (if (= (window-height) before-height)
+            (split-window-vertically)
+          (split-window-horizontally))
+        (other-window 1)
+        (switch-to-buffer other-buf)
+        (other-window -1)))
+    (bind-key "C-c t" 'window-toggle-division)
+
+    (leaf ace-window
+      :ensure t
+      :config
+      (defun my-ace-window ()
+        "画面が1つの時は画面を分割して移動、
+       画面が3個以下の時は1画面ずつ移動、
+       4画面以上の場合は指定して移動"
+        (interactive)
+        (cond ((= (count-windows) 1)
+               (split-window-right)
+               (other-window 1))
+              ((> (count-windows) 4)
+               (ace-window 0))
+              (t (other-window 1))))
+      (setq aw-keys '(?a ?s ?d ?f ?g ?h ?j ?k ?l))
+      (bind-key* "C-t" 'my-ace-window))
+    )
+#+end_src
+
+** Dired
+#+BEGIN_SRC emacs-lisp
+  (leaf *dired
+    :disabled
+    :config
+    ;; diredの表示形式変更
+    (setq dired-listing-switches (purecopy "-Ahvl --time-style long-iso"))
+    ;; 2ウィンドウ時にファイルコピーや移動をした場合に現在表示している片方のディレクトリをデフォルト移動先にする
+    (setq dired-dwim-target t)
+    ;; diredバッファでC-sした時にファイル名のみマッチ
+    (setq dired-isearch-filenames t)
+
+    (bind-keys :map dired-mode-map
+               ;; テキストのように編集
+               ("e" . wdired-change-to-wdired-mode)
+               ;; 上のディレクトリに移動移動
+               ("r" . dired-up-directory)
+               ;; シンボリックリンクを作成
+               ("l" . dired-do-symlink))
+
+    ;; ソート機能を拡張
+    (leaf dired-quick-sort
+      :ensure t
+      :config
+      (dired-quick-sort-setup)))
+#+END_SRC
+
+** Undo
+#+BEGIN_SRC emacs-lisp
+  (leaf *undo
+    :disabled
+    :config
+    (leaf undo-tree
+      :ensure t
+      :config
+      (add-hook 'find-file-hook
+                '(lambda ()
+                   (undo-tree-mode)
+                   (diminish 'undo-tree-mode)))
+      (bind-key* "C-x u" 'undo-tree-visualize))
+
+    (leaf undohist
+      :ensure t
+      :require t
+      :config
+      (undohist-initialize)
+      )
+
+    (leaf point-history
+      :init (leaf popwin :ensure t)
+      :el-get blue0513/point-history
+      :diminish (point-history-mode "")
+      :config
+      (point-history-mode t)
+      (setq point-history-ignore-buffer "^ \\*Minibuf\\|^ \\*point-history-show*")
+      (setq point-history-save-timer 2)
+      (bind-key* "C-_" 'point-history-show))
+    )
+#+END_SRC
+
+** ediff
+#+BEGIN_SRC emacs-lisp
+  (leaf *ediff
+    :config
+    ;; コントロール用のバッファを同一フレーム内に表示
+    (setq ediff-window-setup-function 'ediff-setup-windows-plain)
+    ;; diffのバッファを上下ではなく左右に並べる
+    (setq ediff-split-window-function 'split-window-horizontally)
+    (custom-set-faces
+     '(ediff-current-diff-A ((t (:background "#ffdddd"))))
+     '(ediff-current-diff-B ((t (:background "#ddffdd"))))
+     '(ediff-current-diff-C ((t (:background "#ffffaa"))))
+     '(ediff-even-diff-A    ((t (:background "light grey"))))
+     '(ediff-even-diff-B    ((t (:background "Grey"))))
+     '(ediff-even-diff-C    ((t (:background "light grey"))))
+     '(ediff-fine-diff-A    ((t (:background "#ffbbbb"))))
+     '(ediff-fine-diff-B    ((t (:background "#aaffaa"))))
+     '(ediff-fine-diff-C    ((t (:background "#ffff55"))))
+     )
+    )
+#+END_SRC
+
+** Midnight
+#+BEGIN_SRC emacs-lisp
+  (leaf midnight
+    :disabled
+    :ensure t
+    :doc "バッファを自動でkillする"
+    :config
+    (setq clean-buffer-list-delay-general t))
+#+END_SRC
+
+** CUA mode
+#+BEGIN_SRC emacs-lisp
+  (leaf *CUA
+    :disabled
+    :config
+    (cua-mode t)
+    (setq cua-enable-cua-keys nil)
+    (bind-key* "M-SPC" 'cua-set-rectangle-mark)
+    )
+#+END_SRC
+
+** MWIM
+#+BEGIN_SRC emacs-lisp
+  (leaf mwim
+    :disabled
+    :ensure t
+    :doc "コメントやスペースを認識して行頭、行末に移動"
+    :config
+    (bind-keys*
+      ("C-a" . mwim-beginning-of-line-or-code)
+      ("C-e" . mwim-end-of-code-or-line)
+      )
+    )
+#+END_SRC
+
+** Which Key
+#+BEGIN_SRC emacs-lisp
+  (leaf which-key
+    :disabled
+    :ensure t
+    :doc "emacsのショートカットで次のキーを表示"
+    :diminish (which-key-mode "")
+    :config
+    (which-key-mode))
+#+END_SRC
+
+** Projectile
+#+BEGIN_SRC emacs-lisp
+  (leaf projectile
+    :disabled
+    :ensure t
+    :config
+    (projectile-mode t))
+#+END_SRC
+
+** Org
+#+BEGIN_SRC emacs-lisp
+  (leaf *org
+    :config
+    (bind-key "C-c c" 'org-capture)
+    (bind-key "C-c l" 'org-store-link)
+    (setq work-dir "~/.emacs.d/work/")
+    (setq taskfile (concat work-dir "tasks.org"))
+    (setq memofile "./memo.org")
+    (setq org-capture-templates
+          '(
+            ("t" "タスク" entry (file+headline taskfile "Tasks") "** TODO %? \n")
+            ("m" "メモ" entry (file+headline memofile "Memos") "** %a\n%?\n")
+            ))
+    (custom-set-faces
+     '(org-block-begin-line      ((t (:background "#202020" :foreground "#a0a0a0"))))
+     '(org-block-end-line        ((t (:background "#202020" :foreground "#a0a0a0"))))
+     '(org-block                 ((t (:background "#0f0f0f"))))
+     '(org-document-info-keyword ((t (:foreground "#737373"))))
+     )
+    )
+#+END_SRC
+
+* Color
+** Theme
+#+BEGIN_SRC emacs-lisp
+  (leaf doom-themes
+    :disabled
+    :ensure t
+    :config
+    (load-theme 'doom-molokai t)
+    (leaf doom-modeline
+      :ensure t
+      :custom
+      (mode-line          . '((t (:background "#5f5f5f"))))
+      (mode-line-inactive . '((t (:background "#101010" :foreground "#454545"))))
+      :config
+      (setq doom-modeline-buffer-file-name-style 'truncate-with-project)
+      (setq doom-modeline-icon t)
+      (setq doom-modeline-major-mode-icon t)
+      (setq doom-modeline-major-mode-color-icon t)
+      (setq doom-modeline-buffer-state-icon t)
+      (setq doom-modeline-buffer-modification-icon t)
+      (setq doom-modeline-unicode-fallback t)
+      (setq doom-modeline-height 25)
+      (setq doom-modeline-bar-width 3)
+      (setq doom-modeline-icon (display-graphic-p))
+      (setq doom-modeline-buffer-encoding nil)
+      (setq doom-modeline-minor-modes t)
+      (setq doom-modeline-lsp nil)
+      (doom-modeline-mode))
+    )
+#+END_SRC
+
+** Face
+#+BEGIN_SRC emacs-lisp
+  (custom-set-faces
+   '(default                   ((t (:background "#030303"))))
+   '(hl-line                   ((t (:background "#204040" :weight bold))))
+   '(dired-ignored             ((t (:foreground "#afafaf"))))
+   '(region                    ((t (:background "#502020"))))
+   '(cua-rectangle             ((t (:background "#502020"))))
+   '(show-paren-match          ((t (:background "#a000a0"))))
+   '(line-number               ((t (:background "#141414" :foreground "#707070"))))
+   '(line-number-current-line  ((t (:foreground "#ffffff"))))
+   '(vertical-border           ((t (:background "#8b8386" :foreground "#8b8386"))))
+   '(ediff-current-diff-A      ((t (:background "#205050" :foreground "#ffffff"))))
+   '(ediff-current-diff-B      ((t (:background "#205050" :foreground "#ffffff"))))
+   '(ediff-even-diff-A         ((t (:background "#000000" :foreground "#b6e63e"))))
+   '(ediff-even-diff-B         ((t (:background "#000000" :foreground "#b6e63e"))))
+   '(ediff-fine-diff-A          ((t (:foreground "#b6e63e"))))
+   '(ediff-fine-diff-B          ((t (:foreground "#b6e63e"))))
+   )
+  (global-hl-line-mode t)
+  (defun my-face-at-point ()
+    (let ((face (get-text-property (point) 'face)))
+      (or (and (face-list-p face)
+               (car face))
+          (and (symbolp face)
+               face))))
+
+  (defun my-describe-face (&rest ignore)
+    (interactive (list (read-face-name "Describe face"
+                                       (or (my-face-at-point) 'default)
+                                       t)))
+    ;; This only needs to change the `interactive` spec, so:
+    nil)
+
+  (eval-after-load "hl-line"
+    '(advice-add 'describe-face :before #'my-describe-face))
+  (setq show-parent-delay 0)
+  (show-paren-mode t)
+#+END_SRC
+
+** Rainbow Paren
+#+BEGIN_SRC emacs-lisp
+  (leaf rainbow-delimiters
+    :ensure t
+    :config
+    (rainbow-delimiters-mode t)
+    (add-hook 'prog-mode-hook 'rainbow-delimiters-mode)
+
+    (require 'cl-lib)
+    (require 'color)
+    (custom-set-faces
+     '(rainbow-delimiters-depth-1-face ((t (:foreground "#cd0000"))))
+     '(rainbow-delimiters-depth-2-face ((t (:foreground "#00cd00"))))
+     '(rainbow-delimiters-depth-3-face ((t (:foreground "#cdcd00"))))
+     '(rainbow-delimiters-depth-4-face ((t (:foreground "#00cdff"))))
+     '(rainbow-delimiters-depth-5-face ((t (:foreground "#cdcdff"))))
+     '(rainbow-delimiters-depth-6-face ((t (:foreground "#ff0000"))))
+     '(rainbow-delimiters-depth-7-face ((t (:foreground "#00ff00"))))
+     '(rainbow-delimiters-depth-8-face ((t (:foreground "#ffff00"))))
+     '(rainbow-delimiters-depth-9-face ((t (:foreground "#ff00ff"))))
+     )
+    )
+#+END_SRC
+
+** White Space
+#+begin_src emacs-lisp
+  (leaf whitespace
+    :ensure t
+    :diminish (global-whitespace-mode "")
+    :config
+    (setq whitespace-style '(face           ; faceで可視化
+                             trailing       ; 行末
+                             tabs           ; タブ
+                             space-mark     ; 表示のマッピング
+                             tab-mark
+                             ))
+    (setq whitespace-display-mappings
+          '((tab-mark ?\t [?\u00BB ?\t] [?\\ ?\t])))
+    (global-whitespace-mode t)
+    )
+#+end_src
+
+* Magit
+#+begin_src emacs-lisp
+  (leaf magit
+    :ensure t
+    :if (executable-find "git")
+    :config
+    (eval-after-load "magit-log"
+      '(progn
+         (custom-set-variables
+          '(magit-log-margin '(t "%Y-%m-%d %H:%M:%S" magit-log-margin-width t 18)))))
+    (custom-set-faces
+     '(magit-diff-added ((t (:background "#000000" :foreground "#91b831"))))
+     '(magit-diff-context ((t (:background "#000000" :foreground "#80807f"))))
+     '(magit-diff-context-highlight ((t (:background "#1c1c1c"))))
+     '(magit-diff-hunk-heading-highlight ((t (:background "#6060b0" :foreground "#ffffff" :weight bold))))
+     '(magit-diff-removed ((t (:background "#000000" :foreground "#b83c30"))))
+       )
+
+    (bind-key "C-x g" 'magit-status)
+
+    (leaf git-gutter
+      :ensure t
+      :diminish (git-gutter-mode "")
+      :config
+      (global-git-gutter-mode t))
+    )
+#+end_src
+
+* Search
+** Migemo
+#+begin_src emacs-lisp
+  (leaf migemo
+    :ensure t
+    :diminish
+    :if (executable-find "cmigemo")
+    :config
+    (setq migemo-command "cmigemo")
+    (setq migemo-options '("-q" "--emacs"))
+    (setq migemo-dictionary "/usr/local/share/migemo/utf-8/migemo-dict")
+    (setq migemo-user-dictionary nil)
+    (setq migemo-regex-dictionary nil)
+    (setq migemo-coding-system 'utf-8)
+    (load-library "migemo")
+    (migemo-init)
+    )
+#+end_src
+
+** Helm
+#+begin_src emacs-lisp
+  (leaf *helm
+    :config
+    (leaf helm
+      :ensure t
+      :diminish (helm-mode "")
+      :config
+      (leaf recentf-ext :ensure t)
+      (helm-mode t)
+      (when (executable-find "cmigemo")
+        (helm-migemo-mode t)
+        (diminish 'helm-migemo-mode))
+      (helm-autoresize-mode t)
+      (setq case-fold-search t)
+      (setq recent-max-saved-items 1000)
+      (setq helm-buffer-max-length 50)
+      (setq recentf-exclude
+            '("/TAGS$" "/var/tmp/"))
+      (custom-set-variables
+       '(helm-mini-default-sources
+         '(helm-source-files-in-current-dir
+           helm-source-buffers-list
+           helm-source-recentf)))
+      (leaf helm-ghq
+        :ensure t
+        :if (executable-find "ghq")
+        :require t
+        :config
+        (setq helm-mini-default-sources
+              (cons 'helm-ghq-source helm-mini-default-sources)))
+      (bind-keys
+       ("C-x b"   . helm-mini)
+       ("C-x C-b" . helm-buffers-list)
+       ("C-x f"   . helm-recentf)
+       ("C-x C-f" . helm-find-files)
+       ("M-y"     . helm-show-kill-ring)
+       ("M-x"     . helm-M-x))
+      (bind-key "TAB" 'helm-execute-persistent-action helm-find-files-map)
+      (bind-key "TAB" 'helm-execute-persistent-action helm-read-file-map)
+      )
+
+    (leaf helm-swoop
+      :ensure t
+      :config
+      (bind-key* "C-o" 'helm-swoop)
+      (bind-key* "M-o" 'helm-multi-swoop-all)
+      )
+
+    (leaf helm-ag
+      :ensure t
+      :if (executable-find "ag")
+      :config
+      (defun helm-projectile-ag ()
+        (interactive)
+        (backward-word)
+        (cua-set-mark)
+        (forward-word)
+        (helm-do-ag (projectile-project-root)))
+      (setq helm-ag-base-command "ag --nogrou --ignore-case --nocolor")
+      (bind-key "C-c s" 'helm-projectile-ag)
+      (bind-key "C-c b" 'helm-ag-pop-stack)
+      )
+    )
+#+end_src
+
+* Elscreen
+#+begin_src emacs-lisp
+  (leaf elscreen
+    :ensure t
+    :config
+    (setq elscreen-tab-display-control nil)
+    (setq elscreen-tab-display-kill-screen nil)
+    (setq elscreen-prefix-key (kbd "C-q"))
+    (bind-key* "M-n" 'elscreen-next)
+    (bind-key* "M-p" 'elscreen-previous)
+    (bind-key* "C-z" 'suspend-emacs)
+
+    (elscreen-start)
+    (custom-set-faces
+     '(elscreen-tab-current-screen-face
+       ((t (:background "#a8a8a8" :foreground "#000000"))))
+     '(elscreen-tab-other-screen-face
+       ((t (:background "#292929" :foreground "#a5a5a5"))))
+     '(elscreen-tab-background-face
+       ((t (:background "#585858"))))
+     )
+    )
+#+end_src
+
+* Auto Complete
+** Company
+#+begin_src emacs-lisp
+  (leaf company
+    :disabled
+    :ensure t
+    :diminish (company-mode "")
+    :config
+    (global-company-mode)
+    (setq company-auto-expand t)
+    (setq company-idle-delay 0)
+    (setq company-minimum-prefix-length 3)
+    (setq company-selection-wrap-around t)
+
+    (defun company--insert-candidate2 (candidate)
+      (when (> (length candidate) 0)
+        (setq candidate (substring-no-properties candidate))
+        (if (eq (company-call-backend 'ignore-case) 'keep-prefix)
+            (insert (company-strip-prefix candidate))
+          (if (equal company-prefix candidate)
+              (company-select-next)
+            (delete-region (- (point) (length company-prefix)) (point))
+            (insert candidate))
+          )))
+    (defun company-complete-common2 ()
+      (interactive)
+      (when (company-manual-begin)
+        (if (and (not (cdr company-candidates))
+                 (equal company-common (car company-candidates)))
+            (company-complete-selection)
+          (company--insert-candidate2 company-common))))
+
+    (bind-keys :map company-active-map
+         ("C-n" . company-select-next)
+         ("C-p" . company-select-previous)
+         ("TAB" . company-complete-common2)
+         ("C-h" . nil)
+         )
+    (bind-key "M-i" 'company-other-backend)
+
+    ;; なぜか bind-key だとエラーになったので define-keyで設定
+    (define-key company-active-map (kbd "C-d") 'company-show-doc-buffer))
+
+  (leaf company-quickhelp
+      :ensure t
+      :config
+      (company-quickhelp-mode t))
+#+end_src
+
+** Yasnippet
+#+begin_src emacs-lisp
+  (leaf yasnippet
+    :disabled
+    :ensure t
+    :diminish (yas-minor-mode "")
+    :config
+    (leaf yasnippet-snippets :ensure t)
+    (leaf helm-c-yasnippet
+      :ensure t
+      :config
+      (setq helm-yas-space-match-any-greedy t))
+    (yas-global-mode t)
+    (bind-keys :map yas-minor-mode-map
+               ("C-c y"     . helm-yas-complete)
+               ("<backtab>" . yas-expand)
+               ("TAB"       . nil)))
+#+end_src
+
+** Autoinsert
+#+begin_src emacs-lisp
+  (leaf autoinsert
+    :ensure t
+    :require t
+    :config
+    (add-hook 'find-file-hooks 'auto-insert)
+    (setq auto-insert-directory "~/.emacs.d/autoinsert/")
+    (setq auto-insert-alist
+          (append
+           '(("\\.py" . "template.py")
+             ("\\.sh" . "template.sh")
+             ("\\.el" . "template.el"))
+           auto-insert-alist))
+    )
+#+end_src
+
+* Language Server Protocol
+#+begin_src emacs-lisp
+  (leaf *lsp
+    :disabled
+    :config
+    (leaf lsp-mode
+      :ensure t
+      ;;:diminish (lsp-mode "")
+      :require t
+      :config
+      (setq lsp-print-io nil)
+      (setq lsp-auto-guess-root t)
+      (setq lsp-response-timeout 10)
+      (setq lsp-prefer-flymake 'flymake)
+      (setq lsp-enable-completion-at-point nil)
+      (setq lsp-file-watch-threshold 50000)
+      (bind-key "M-t n" 'lsp-rename)
+      (bind-key "M-t i" 'helm-imenu)
+      (bind-key "M-t b" 'xref-pop-marker-stack)
+      (bind-key "M-t w" 'xref-find-definitions-other-window)
+      (defun lsp--sort-completions (completions)
+        (lsp-completion--sort-completions completions))
+      (defun lsp--annotate (item)
+        (lsp-completion--annotate item))
+      (defun lsp--resolve-completion (item)
+        (lsp-completion--resolve item))
+      )
+
+    (leaf lsp-ui
+      :disabled
+      :ensure t
+      :require t
+      :hook (lsp-mode . lsp-ui-mode)
+      :config
+      (setq lsp-ui-doc-enable t)
+      (setq lsp-ui-doc-header t)
+      (setq lsp-ui-doc-include-signature t)
+      (setq lsp-ui-doc-position 'bottom)
+      (setq lsp-ui-doc-max-width 150)
+      (setq lsp-ui-doc-max-height 600)
+      (setq lsp-ui-flycheck-enable nil)
+      (setq lsp-ui-flymake-enable t)
+      (setq lsp-ui-sideline-enable nil)
+      (setq lsp-ui-sideline-ignore-duplicate nil)
+      (setq lsp-ui-sideline-show-symbol t)
+      (setq lsp-ui-sideline-show-hover nil)
+      (setq lsp-ui-sideline-show-diagnostics t)
+      (setq lsp-ui-sideline-show-code-actions nil)
+      (setq lsp-ui-imenu-enable nil)
+      (setq lsp-ui-imenu-kind-position 'bottom)
+      (setq lsp-ui-peek-enable nil)
+      (setq lsp-ui-peek-list-width 60)
+      (setq lsp-ui-peek-peek-height 30)
+      (setq lsp-ui-peek-fontify 'on-demand)
+      (bind-key "M-t s" 'lsp-ui-peek-find-definitions)
+      (bind-key "M-t r" 'lsp-ui-peek-find-references)
+      )
+
+    (leaf company-lsp
+      :ensure t
+      :config
+      (setq company-lsp-cache-candidates t)
+      (setq company-lsp-async t)
+      (setq company-lsp-enable-recompletion nil)
+      (push 'company-lsp company-backends))
+    )
+#+end_src
+
+* Program Language
+** Python
+#+begin_src emacs-lisp
+  (leaf *python
+    :disabled
+    :config
+    (leaf live-py-mode :ensure t)
+
+    (leaf lsp-pyright
+      :disabled
+      :ensure t
+      :config
+      (add-hook 'python-mode-hook
+                '(lambda ()
+                   (require 'lsp-pyright)
+                   (lsp))))
+
+    (leaf poetry
+      :disabled
+      :ensure t
+      :hook ((python-mode-hook . poetry-tracking-mode)))
+
+    (leaf pipenv
+      :disabled
+      :ensure t
+      :require t
+      :diminish (pipenv "")
+      :init
+      (setq pipenv-projectile-after-switch-function
+            #'pipenv-projectile-after-switch-extended))
+
+    (leaf python-black
+      :disabled
+      :ensure t
+      :config
+      (bind-key "M-t t" 'python-black-buffer))
+
+    (add-hook 'python-mode-hook
+              '(lambda ()
+                 (my-hs)
+                 (setq indent-tabs-mode nil)
+                 (setq indent-level 4)
+                 (setq python-indent 4)
+                 (setq tab-width 4)))
+
+    (leaf *flymake
+      :disabled
+      :config
+      (leaf flymake-python-pyflakes
+        :disabled
+        :ensure t
+        :config
+        (add-hook 'python-mode-hook 'flymake-python-pyflakes-load)
+        (setq flymake-python-pyflakes-executable "flake8")
+        (bind-key "M-t f" 'flymake-goto-next-error)
+        )
+
+      (leaf flymake-diagnostic-at-point
+        :ensure t
+        :require t
+        :after flymake
+        :init
+        (remove-hook 'flymake-diagnostic-functions 'flymake-proc-legacy-flymake)
+        :config
+        (setq flymake-diagnostic-at-point-timer-delay 0.1)
+        (setq flymake-diagnostic-at-point-display-diagnostic-function 'flymake-diagnostic-at-point-display-minibuffer)
+        :config
+        (add-hook 'flymake-mode-hook #'flymake-diagnostic-at-point-mode)
+        )
+      )
+    )
+#+END_SRC
+** YAML
+#+begin_src emacs-lisp
+  (use-package yaml-mode
+    :ensure t
+    :mode (("\\.yaml$" . yaml-mode)
+           ("\\.yml$" . yaml-mode)))
+#+end_src
+
+** JSON
+#+begin_src emacs-lisp
+  (use-package json-mode
+    :ensure t
+    :mode ("\\.json$" . json-mode))
+#+end_src
+
+** CSV
+#+begin_src emacs-lisp
+  (use-package csv-mode :ensure t)
+#+end_src
+
+** groovy
+#+begin_src emacs-lisp
+  (use-package groovy-mode :ensure t)
+#+end_src
